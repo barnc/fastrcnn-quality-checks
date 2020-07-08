@@ -1,6 +1,7 @@
 """
 Module for object detection default handler
 """
+import base64
 import io
 import torch
 import numpy as np
@@ -70,25 +71,41 @@ class ObjectDetector(VisionHandler):
         print(pred_boxes)
 
         pred_quality = []
+        regions = []
         for i in range(len(pred_boxes)):
-            print(i)
-            pred_quality.append(check_quality(np_img, pred_boxes[i]))
+            region, quality = check_quality(np_img, pred_boxes[i])
+            pred_quality.append(quality)
+            regions.append(region)
 
-        return [pred_class, pred_boxes, pred_quality]
+        return [pred_class, pred_boxes, pred_quality, regions]
 
     def postprocess(self, data):
         pred_class = data[0]
         pred_quality = data[2]
+        """regions is a numpy array of the region containing the detected object"""
+        regions = data[3]
         try:
             if self.mapping:
                 pred_class = [self.mapping['object_type_names'][i] for i in pred_class]  # Get the Prediction Score
+                pil_img = Image.fromarray(regions[0])
+                buff = io.BytesIO()
+                pil_img.save(buff, format="PNG")
+                base64_img = base64.b64encode(buff.getvalue()).decode("utf-8")
 
-            retval = []
-            for idx, box in enumerate(data[1]):
-                class_name = pred_class[idx]
-                quality = pred_quality[idx]
-                retval.append({class_name: str(box), "quality": str(quality)})
-            return [retval]
+                retval = {
+                    'confidence': {
+                        'positive': 0.9,
+                        'negative': 0.1
+                    },
+                    'quality': pred_quality[0],
+                    'regions': {
+                        'rdt': base64_img,
+                        'diagnostic': base64_img
+                    }
+                }
+
+                return [retval]
+
         except Exception as e:
             raise Exception('Object name list file should be json format - {"object_type_names":["person","car"...]}"'
                             + e)
@@ -158,9 +175,9 @@ def check_quality(image, box):
     blur_status = "blurred" if is_blurred else "ok"
     print("Exposure: " + exposure_status)
     print("Blur: " + blur_status)
-
-    return {
+    quality = {
         "blur_status": blur_status,
         "exposure_status": exposure_status
     }
+    return cropped, quality
     
